@@ -98,6 +98,12 @@ func main() {
 	sched.Start()
 	defer sched.Stop()
 
+	blogSvc := service.NewBlogService(
+		repository.NewBlogRepo(db), repository.NewFollowRepo(db), rdb, repository.NewUserRepo(db))
+	blogGroup := srv.Engine().Group("/blog", middleware.UVCount(rdb, "blog"))
+	handler.NewBlogHandler(blogSvc, rdb).Register(blogGroup)
+	handler.NewUploadHandler(cfg.UploadDir).Register(srv.Engine().Group("/upload"))
+
 	refundConsumer, err := mq.NewRefundConsumer(cfg.RocketMQNameSrv, "inskill-refund-consumer")
 	if err != nil {
 		logger.Error("init refund consumer failed", "err", err)
