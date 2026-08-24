@@ -1,0 +1,6 @@
+http_addr: ":8081"
+mysql_dsn: "root:root@tcp(127.0.0.1:3306)/inskill?charset=utf8mb4&parseTime=True&loc=Local"
+redis_addr: "127.0.0.1:6379"
+rocketmq_namesrv: "127.0.0.1:9876"
+upload_dir: "uploads"
+order_timeout: 30m

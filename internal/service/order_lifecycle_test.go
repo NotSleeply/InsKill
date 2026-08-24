@@ -96,8 +96,8 @@ func TestPayCallbackOnClosedOrder(t *testing.T) {
 func TestCloseTimeoutOrdersRefundsStock(t *testing.T) {
 	pub := &fakePublisher{}
 	repo := &fakeLifecycleRepo{orders: map[int64]*model.VoucherOrder{
-		1: {ID: 1, Status: model.OrderStatusUnpaid, VoucherID: 10, CreateTime: time.Now().Add(-time.Hour)},
-		2: {ID: 2, Status: model.OrderStatusUnpaid, VoucherID: 10, CreateTime: time.Now()}, // 未超时
+		1: {ID: 1, Status: model.OrderStatusUnpaid, VoucherID: 10, CreateTime: time.Now().Add(-2 * time.Hour)},
+		2: {ID: 2, Status: model.OrderStatusUnpaid, VoucherID: 10, CreateTime: time.Now().Add(time.Hour)}, // 未超时
 	}, stockByVoucher: map[int64]int32{}}
 	mr := miniredis.RunT(t)
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})

@@ -49,12 +49,8 @@ func (s *voucherService) Create(ctx context.Context, v *model.Voucher) error {
 	sv := &model.SeckillVoucher{
 		VoucherID: v.ID,
 		Stock:     v.Stock,
-	}
-	if v.BeginTime != nil {
-		sv.BeginTime = *v.BeginTime
-	}
-	if v.EndTime != nil {
-		sv.EndTime = *v.EndTime
+		BeginTime: v.BeginTime,
+		EndTime:   v.EndTime,
 	}
 	if err := s.seckillRepo.Create(ctx, sv); err != nil {
 		return err

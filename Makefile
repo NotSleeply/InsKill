@@ -1,4 +1,4 @@
-.PHONY: build run test vet
+.PHONY: build run test vet up integration
 
 build:
 	go build -o bin/inskill ./cmd/server
@@ -11,3 +11,9 @@ test:
 
 vet:
 	go vet ./...
+
+up:
+	docker compose -f deploy/docker-compose.yml up -d --build
+
+integration:
+	go test -tags integration ./integration/ -v

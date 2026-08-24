@@ -63,8 +63,8 @@ CREATE TABLE `seckill_voucher` (
   `voucher_id` bigint(20) UNSIGNED NOT NULL COMMENT '关联的优惠券id',
   `stock` int(8) NOT NULL COMMENT '库存',
   `create_time` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `begin_time` timestamp NOT NULL DEFAULT '0000-00-00 00:00:00' COMMENT '生效时间',
-  `end_time` timestamp NOT NULL DEFAULT '0000-00-00 00:00:00' COMMENT '失效时间',
+  `begin_time` timestamp NULL DEFAULT NULL COMMENT '生效时间',
+  `end_time` timestamp NULL DEFAULT NULL COMMENT '失效时间',
   `update_time` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`voucher_id`),
   KEY `idx_begin_end` (`begin_time`, `end_time`)
@@ -1306,7 +1306,7 @@ INSERT INTO `user` VALUES (1009, '13688669888', '', 'user_4qh6bofkol', '', '2022
 -- ----------------------------
 -- Records of tb_voucher
 -- ----------------------------
-INSERT INTO `voucher` VALUES (1, 1, '50元代金券', '周一至周日均可使用', '全场通用\\n无需预约\\n可无限叠加\\不兑现、不找零\\n仅限堂食', 4750, 5000, 0, 1, '2022-01-04 09:42:39', '2022-01-04 09:43:31');
+INSERT INTO `voucher` VALUES (1, 1, '50元代金券', '周一至周日均可使用', '全场通用\\n无需预约\\n可无限叠加\\不兑现、不找零\\n仅限堂食', 4750, 5000, 0, 1, 0, NULL, NULL, '2022-01-04 09:42:39', '2022-01-04 09:43:31');
 
 -- ----------------------------
 -- ----------------------------
