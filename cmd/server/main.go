@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"inskill/internal/cache"
 	"inskill/internal/config"
@@ -66,11 +67,13 @@ func main() {
 
 	voucherOrderSvc := service.NewVoucherOrderService(
 		repository.NewVoucherOrderRepo(db), repository.NewSeckillVoucherRepo(db), orderPub, rdb)
-	handler.NewVoucherOrderHandler(voucherOrderSvc).Register(srv.Engine().Group("/voucher-order"))
+	handler.NewVoucherOrderHandler(voucherOrderSvc).Register(srv.Engine().Group("/voucher-order",
+		middleware.RateLimit(rdb, "limit:seckill:", time.Minute, 60, middleware.IPDimension)))
 
 	voucherSvc := service.NewVoucherService(
 		repository.NewVoucherRepo(db), repository.NewSeckillVoucherRepo(db), rdb)
-	handler.NewVoucherHandler(voucherSvc).Register(srv.Engine().Group("/voucher"))
+	handler.NewVoucherHandler(voucherSvc).Register(srv.Engine().Group("/voucher",
+		middleware.RateLimit(rdb, "limit:voucher:", time.Minute, 10, middleware.UserDimension)))
 
 	// 秒杀订单消费者
 	orderConsumer, err := mq.NewSeckillConsumer(cfg.RocketMQNameSrv, "inskill-seckill-consumer")
