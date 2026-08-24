@@ -22,13 +22,15 @@
 - 用户签到（BitMap）、UV 统计（HyperLogLog）
 - 滑动窗口限流（Redis ZSet + Lua，按 IP / 用户维度）
 
+**实现状态说明**：以上增强项中，缓存穿透/击穿/雪崩、RabbitMQ 异步下单在 Java 代码里已实现；二级缓存（Caffeine）、滑动窗口限流、超时关单、支付回调、对账任务在 CityHub README 中有完整设计但 Java 代码未实现。Go 版按 README 设计将这些补齐为真实实现。
+
 ## 技术选型
 
 - **语言**：Go 1.22+（slog、go:embed）
 - **HTTP**：Gin，生态事实标准，中间件齐全
 - **数据访问**：GORM（用户指定），简单 CRUD 用 GORM，复杂 SQL 走 Raw
 - **Redis**：go-redis，事实标准客户端
-- **MQ**：RocketMQ（apache/rocketmq-client-go/v2，用户要求保留），抽象 Publisher/Subscriber 接口隔离客户端
+- **MQ**：RocketMQ（apache/rocketmq-client-go/v2，用户最终确认），抽象 Publisher/Subscriber 接口隔离客户端。注：Java 版实际运行代码是 RabbitMQ（交换机 X/路由 XA/队列 QA、TTL 10 秒转死信 QD），README 宣称 RocketMQ 但代码未实现；Go 版以 RocketMQ 落地：Topic `seckill-order` + 消费组 + 重试/死信队列，幂等靠订单 ID 唯一键（对应 Java 版 QA/QD 双消费的结构语义）
 - **本地缓存**：ristretto，Go 生态最接近 Caffeine（W-TinyLFU）
 - **日志**：标准库 slog，结构化 JSON，零依赖
 - **配置**：环境变量优先 + 可选 config.yaml（12-factor）
@@ -55,7 +57,7 @@ inskill/
 │   ├── lock/                   # 分布式锁（SETNX + Lua 解锁）
 │   ├── seckill/                # 秒杀域：预扣 Lua 脚本（go:embed 内嵌）、库存、一人一单
 │   ├── mq/                     # Publisher/Subscriber 接口 + RocketMQ 实现
-│   ├── id/                     # 雪花 ID（Redis 分配 workerID）
+│   ├── id/                     # 订单 ID：时间戳<<32 | Redis 日自增（直译 RedisIdWorker，非经典雪花）
 │   ├── scheduler/              # 定时任务注册
 │   └── pkg/errs/               # 哨兵错误 + 统一响应 Result
 ├── scripts/schema.sql          # 改造后的建表脚本
@@ -89,6 +91,7 @@ inskill/
    - `shop`：`idx_type_id`
    - `seckill_voucher`：`idx(begin_time, end_time)`
 4. 字段、数据不变；INSERT 数据改表名后可直接导入，方便与 Java 版对照验证
+5. 补遗漏列：`voucher` 表补 `stock`、`begin_time`、`end_time` 三列（Java 实体和 addSeckillVoucher 依赖，原 SQL 文件遗漏）
 
 ### 其他
 
@@ -138,8 +141,7 @@ Redis 预扣 Lua（校验库存 + 一人一单 Set，原子）→ 返回「排�
 
 ## 部署与运行
 
-- `docker-compose.yml`：MySQL 8 + Redis 7 + RocketMQ（namesrv + broker）+ 应用（多阶段 Dockerfile）
-- 配置：环境变量优先，config.yaml 可选覆盖
+- `docker-compose.yml`：MySQL 8 + Redis 7 + RocketMQ（namesrv + broker）+ 应用（多阶段 Dockerfile）- 配置：环境变量优先，config.yaml 可选覆盖
 - Makefile：`build / run / test / up`；schema.sql 挂 MySQL 初始化目录
 - 应用四件套：优雅关闭（signal + http.Server.Shutdown + 消费者关停）、`/healthz`、slog 结构化日志、配置外置
 
