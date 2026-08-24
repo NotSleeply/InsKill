@@ -4,6 +4,7 @@ services:
     environment:
       MYSQL_ROOT_PASSWORD: root
       MYSQL_DATABASE: inskill
+      TZ: Asia/Shanghai
     ports: ["3306:3306"]
     volumes:
       - ../scripts/schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro
@@ -31,6 +32,17 @@ services:
     ports: ["10909:10909", "10911:10911", "10912:10912"]
     volumes:
       - ./broker.conf:/home/rocketmq/rocketmq-5.1.4/conf/broker.conf:ro
+
+  # 预创建 topic：RocketMQ consumer 启动要求 topic 路由存在
+  rocketmq-init:
+    image: apache/rocketmq:5.1.4
+    depends_on: ["rocketmq-namesrv", "rocketmq-broker"]
+    entrypoint: >
+      sh -c "sleep 15 &&
+      sh mqadmin updateTopic -n rocketmq-namesrv:9876 -c DefaultCluster -t seckill-order &&
+      sh mqadmin updateTopic -n rocketmq-namesrv:9876 -c DefaultCluster -t stock-refund &&
+      echo topics created"
+    restart: "no"
 
   app:
     build:

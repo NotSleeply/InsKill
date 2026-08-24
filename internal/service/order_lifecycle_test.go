@@ -93,6 +93,16 @@ func TestPayCallbackOnClosedOrder(t *testing.T) {
 	}
 }
 
+func TestPayCallbackDuplicateIsIdempotent(t *testing.T) {
+	repo := &fakeLifecycleRepo{orders: map[int64]*model.VoucherOrder{
+		1: {ID: 1, Status: model.OrderStatusPaid},
+	}, stockByVoucher: map[int64]int32{}}
+	svc := &orderLifecycleService{repo: repo, rdb: nil, pub: &fakePublisher{}, timeout: time.Hour}
+	if err := svc.PayCallback(context.Background(), 1); err != nil {
+		t.Fatalf("duplicate callback should be nil, got %v", err)
+	}
+}
+
 func TestCloseTimeoutOrdersRefundsStock(t *testing.T) {
 	pub := &fakePublisher{}
 	repo := &fakeLifecycleRepo{orders: map[int64]*model.VoucherOrder{

@@ -59,18 +59,26 @@ func NewOrderLifecycleService(repo VoucherOrderLifecycleRepository, stockRepo Se
 	return &orderLifecycleService{repo: repo, stockRepo: stockRepo, pub: pub, rdb: rdb, timeout: timeout}
 }
 
-// PayCallback 模拟第三方支付回调：乐观锁置已支付；失败说明已被关单，触发退款流程（不允许改回已支付）。
+// PayCallback 模拟第三方支付回调：乐观锁置已支付；重复回调幂等成功；
+// 已被超时关单则进入退款流程（不允许改回已支付，对齐 README 结论）。
 func (s *orderLifecycleService) PayCallback(ctx context.Context, orderID int64) error {
 	ok, err := s.repo.MarkPaid(ctx, orderID)
 	if err != nil {
 		return err
 	}
-	if !ok {
-		// 订单已被超时关单但用户已付款：进入原路退回流程（对齐 README 结论）
-		slog.Error("order closed but payment arrived, refund required", "order", orderID)
-		return fmt.Errorf("order %d: %w", orderID, errs.ErrOrderClosed)
+	if ok {
+		return nil
 	}
-	return nil
+	order, err := s.repo.GetByID(ctx, orderID)
+	if err != nil {
+		return err
+	}
+	if order.Status == model.OrderStatusPaid {
+		return nil // 重复回调，幂等成功
+	}
+	// 订单已被超时关单但用户已付款：进入原路退回流程
+	slog.Error("order closed but payment arrived, refund required", "order", orderID)
+	return fmt.Errorf("order %d: %w", orderID, errs.ErrOrderClosed)
 }
 
 // CloseTimeoutOrders 超时未支付订单关单：先查出超时未支付订单，再逐单乐观锁取消，

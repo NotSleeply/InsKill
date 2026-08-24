@@ -24,6 +24,7 @@ import (
 
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	slog.SetDefault(logger) // service 层包级 slog.Info 统一走 JSON 输出
 	cfg, err := config.Load()
 	if err != nil {
 		logger.Error("load config failed", "err", err)

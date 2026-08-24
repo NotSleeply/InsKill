@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -141,6 +142,28 @@ func (s *shopService) PreloadGeo(ctx context.Context) error {
 	}
 	for typeID, locs := range byType {
 		if err := s.rdb.GeoAdd(ctx, shopGeoKey+strconv.FormatInt(typeID, 10), locs...).Err(); err != nil {
+			return err
+		}
+	}
+	return s.preloadShopCache(ctx, shops)
+}
+
+// preloadShopCache 商户详情缓存的逻辑过期预热：逻辑过期策略要求缓存先存在
+// （首次查询无缓存时返回空，对齐 Java 版 queryWithLogicalExpire 语义），
+// 启动时一次性写入全部商户，避免首查失败。
+func (s *shopService) preloadShopCache(ctx context.Context, shops []*model.Shop) error {
+	expireAt := time.Now().Add(shopCacheTTL)
+	for _, shop := range shops {
+		b, err := json.Marshal(shop)
+		if err != nil {
+			return err
+		}
+		rd := cache.RedisData{Data: b, ExpireTime: expireAt}
+		out, err := json.Marshal(rd)
+		if err != nil {
+			return err
+		}
+		if err := s.c.Set(ctx, shopCacheKey+strconv.FormatInt(shop.ID, 10), string(out), 0); err != nil {
 			return err
 		}
 	}

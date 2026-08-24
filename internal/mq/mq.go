@@ -4,13 +4,31 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/apache/rocketmq-client-go/v2"
 	"github.com/apache/rocketmq-client-go/v2/consumer"
 	"github.com/apache/rocketmq-client-go/v2/primitive"
 	"github.com/apache/rocketmq-client-go/v2/producer"
 )
+
+// startWithRetry topic 由 mqadmin 异步预创建，consumer 启动可能早于 topic 就绪，
+// 轮询重试 60 秒（对齐 docker-compose 的 rocketmq-init 服务）。
+func startWithRetry(name string, start func() error) error {
+	deadline := time.Now().Add(60 * time.Second)
+	for {
+		if err := start(); err == nil {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("start %s consumer: timeout", name)
+		}
+		slog.Warn("consumer start failed, retrying", "consumer", name)
+		time.Sleep(3 * time.Second)
+	}
+}
 
 // 结构映射：Java 版 RabbitMQ（交换机 X/路由 XA/队列 QA/死信 QD）→ RocketMQ。
 // 死信与重试由 RocketMQ 消费重试机制承担（16 次后进 DLQ），业务幂等靠订单 ID 主键。
@@ -73,16 +91,19 @@ func NewSeckillConsumer(nameSrv, group string) (*SeckillConsumer, error) {
 	return &SeckillConsumer{c: c}, nil
 }
 
-// Start 订阅 TopicSeckillOrder，handler 返回 error 时消费失败进入重试。
+// Start 订阅 TopicSeckillOrder 并启动消费，handler 返回 error 时消费失败进入重试。
 func (s *SeckillConsumer) Start(_ context.Context, handler func(ctx context.Context, msg []byte) error) error {
-	return s.c.Subscribe(TopicSeckillOrder, consumer.MessageSelector{}, func(ctx context.Context, msgs ...*primitive.MessageExt) (consumer.ConsumeResult, error) {
+	if err := s.c.Subscribe(TopicSeckillOrder, consumer.MessageSelector{}, func(ctx context.Context, msgs ...*primitive.MessageExt) (consumer.ConsumeResult, error) {
 		for _, m := range msgs {
 			if err := handler(ctx, m.Body); err != nil {
 				return consumer.ConsumeRetryLater, nil
 			}
 		}
 		return consumer.ConsumeSuccess, nil
-	})
+	}); err != nil {
+		return err
+	}
+	return startWithRetry(TopicSeckillOrder, func() error { return s.c.Start() })
 }
 
 func (s *SeckillConsumer) Shutdown() error {
@@ -115,14 +136,17 @@ func NewRefundConsumer(nameSrv, group string) (*RefundConsumer, error) {
 }
 
 func (r *RefundConsumer) Start(_ context.Context, handler func(ctx context.Context, msg []byte) error) error {
-	return r.c.Subscribe(TopicStockRefund, consumer.MessageSelector{}, func(ctx context.Context, msgs ...*primitive.MessageExt) (consumer.ConsumeResult, error) {
+	if err := r.c.Subscribe(TopicStockRefund, consumer.MessageSelector{}, func(ctx context.Context, msgs ...*primitive.MessageExt) (consumer.ConsumeResult, error) {
 		for _, m := range msgs {
 			if err := handler(ctx, m.Body); err != nil {
 				return consumer.ConsumeRetryLater, nil
 			}
 		}
 		return consumer.ConsumeSuccess, nil
-	})
+	}); err != nil {
+		return err
+	}
+	return startWithRetry(TopicStockRefund, func() error { return r.c.Start() })
 }
 
 func (r *RefundConsumer) Shutdown() error {

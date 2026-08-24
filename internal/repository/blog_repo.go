@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 
 	"inskill/internal/model"
 	"inskill/internal/pkg/errs"
@@ -44,14 +43,10 @@ func (r *BlogRepo) GetByIDsInOrder(ctx context.Context, ids []int64) ([]*model.B
 	if len(ids) == 0 {
 		return []*model.Blog{}, nil
 	}
-	placeholders := make([]string, len(ids))
-	for i := range ids {
-		placeholders[i] = "?"
-	}
 	var blogs []*model.Blog
 	err := r.db.WithContext(ctx).
 		Where("id IN ?", ids).
-		Order("FIELD(id, " + strings.Join(placeholders, ",") + ")").
+		Order(gorm.Expr("FIELD(id, ?)", ids)).
 		Find(&blogs).Error
 	return blogs, err
 }
