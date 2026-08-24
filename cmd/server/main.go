@@ -7,8 +7,10 @@ import (
 	"os/signal"
 	"syscall"
 
+	"inskill/internal/cache"
 	"inskill/internal/config"
 	"inskill/internal/handler"
+	"inskill/internal/lock"
 	"inskill/internal/middleware"
 	"inskill/internal/repository"
 	"inskill/internal/server"
@@ -39,6 +41,19 @@ func main() {
 	userSvc := service.NewUserService(repository.NewUserRepo(db), rdb)
 	userInfoSvc := service.NewUserInfoService(repository.NewUserInfoRepo(db))
 	handler.NewUserHandler(userSvc, userInfoSvc).Register(srv.Engine().Group("/user"))
+
+	cacheClient, err := cache.NewRedisClient(cfg.RedisAddr)
+	if err != nil {
+		logger.Error("init cache failed", "err", err)
+		os.Exit(1)
+	}
+	shopSvc := service.NewShopService(repository.NewShopRepo(db), cacheClient, lock.NewRedisLock(rdb), rdb)
+	if err := shopSvc.PreloadGeo(context.Background()); err != nil {
+		logger.Error("preload geo failed", "err", err)
+	}
+	handler.NewShopHandler(shopSvc).Register(srv.Engine().Group("/shop"))
+	handler.NewShopTypeHandler(service.NewShopTypeService(repository.NewShopTypeRepo(db), rdb)).
+		Register(srv.Engine().Group("/shop-type"))
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
