@@ -29,4 +29,7 @@ var (
 	ErrInternal     = errors.New("internal error")
 	ErrInvalidPhone = errors.New("invalid phone")
 	ErrCodeMismatch = errors.New("code mismatch")
+
+	ErrStockEmpty      = errors.New("stock empty")
+	ErrDuplicatedOrder = errors.New("duplicated order")
 )

@@ -12,6 +12,7 @@ import (
 	"inskill/internal/handler"
 	"inskill/internal/lock"
 	"inskill/internal/middleware"
+	"inskill/internal/mq"
 	"inskill/internal/repository"
 	"inskill/internal/server"
 	"inskill/internal/service"
@@ -54,6 +55,33 @@ func main() {
 	handler.NewShopHandler(shopSvc).Register(srv.Engine().Group("/shop"))
 	handler.NewShopTypeHandler(service.NewShopTypeService(repository.NewShopTypeRepo(db), rdb)).
 		Register(srv.Engine().Group("/shop-type"))
+
+	orderPub, err := mq.NewRocketMQPublisher(cfg.RocketMQNameSrv, "inskill-producer")
+	if err != nil {
+		logger.Error("init rocketmq producer failed", "err", err)
+		os.Exit(1)
+	}
+	defer orderPub.Shutdown()
+
+	voucherOrderSvc := service.NewVoucherOrderService(
+		repository.NewVoucherOrderRepo(db), repository.NewSeckillVoucherRepo(db), orderPub, rdb)
+	handler.NewVoucherOrderHandler(voucherOrderSvc).Register(srv.Engine().Group("/voucher-order"))
+
+	voucherSvc := service.NewVoucherService(
+		repository.NewVoucherRepo(db), repository.NewSeckillVoucherRepo(db), rdb)
+	handler.NewVoucherHandler(voucherSvc).Register(srv.Engine().Group("/voucher"))
+
+	// 秒杀订单消费者
+	orderConsumer, err := mq.NewSeckillConsumer(cfg.RocketMQNameSrv, "inskill-seckill-consumer")
+	if err != nil {
+		logger.Error("init rocketmq consumer failed", "err", err)
+		os.Exit(1)
+	}
+	if err := orderConsumer.Start(context.Background(), voucherOrderSvc.HandleOrderMessage); err != nil {
+		logger.Error("start rocketmq consumer failed", "err", err)
+		os.Exit(1)
+	}
+	defer orderConsumer.Shutdown()
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
