@@ -14,6 +14,7 @@ import (
 	"inskill/internal/middleware"
 	"inskill/internal/mq"
 	"inskill/internal/repository"
+	"inskill/internal/scheduler"
 	"inskill/internal/server"
 	"inskill/internal/service"
 
@@ -82,6 +83,28 @@ func main() {
 		os.Exit(1)
 	}
 	defer orderConsumer.Shutdown()
+
+	lifecycleSvc := service.NewOrderLifecycleService(
+		repository.NewVoucherOrderRepo(db), repository.NewSeckillVoucherRepo(db),
+		orderPub, rdb, cfg.OrderTimeout)
+	handler.NewPayCallbackHandler(lifecycleSvc).Register(srv.Engine().Group("/voucher-order"))
+
+	sched := scheduler.New()
+	_ = sched.Add("0 */1 * * * *", func() { _ = lifecycleSvc.CloseTimeoutOrders(context.Background()) })
+	_ = sched.Add("0 */5 * * * *", func() { _ = lifecycleSvc.ReconcileAllFinished(context.Background()) })
+	sched.Start()
+	defer sched.Stop()
+
+	refundConsumer, err := mq.NewRefundConsumer(cfg.RocketMQNameSrv, "inskill-refund-consumer")
+	if err != nil {
+		logger.Error("init refund consumer failed", "err", err)
+		os.Exit(1)
+	}
+	if err := refundConsumer.Start(context.Background(), lifecycleSvc.HandleRefundMessage); err != nil {
+		logger.Error("start refund consumer failed", "err", err)
+		os.Exit(1)
+	}
+	defer refundConsumer.Shutdown()
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()

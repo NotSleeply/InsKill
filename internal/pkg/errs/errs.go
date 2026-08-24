@@ -32,4 +32,5 @@ var (
 
 	ErrStockEmpty      = errors.New("stock empty")
 	ErrDuplicatedOrder = errors.New("duplicated order")
+	ErrOrderClosed     = errors.New("order closed")
 )
