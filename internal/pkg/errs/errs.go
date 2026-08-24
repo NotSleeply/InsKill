@@ -27,4 +27,6 @@ var (
 	ErrNotFound     = errors.New("not found")
 	ErrUnauthorized = errors.New("unauthorized")
 	ErrInternal     = errors.New("internal error")
+	ErrInvalidPhone = errors.New("invalid phone")
+	ErrCodeMismatch = errors.New("code mismatch")
 )
