@@ -35,6 +35,7 @@ func startWithRetry(name string, start func() error) error {
 const (
 	TopicSeckillOrder = "seckill-order"
 	TopicStockRefund  = "stock-refund"
+	TopicCacheDel     = "cache-del"
 )
 
 // Publisher 消息发布接口（隔离 RocketMQ 客户端）。
@@ -157,6 +158,50 @@ func (r *RefundConsumer) Shutdown() error {
 	}
 	r.closed = true
 	return r.c.Shutdown()
+}
+
+// CacheDelConsumer 缓存删除补偿消费者：重删删除失败的缓存 key。
+// Del 天然幂等（删不存在的 key 不报错），重复消费无害。
+type CacheDelConsumer struct {
+	c      rocketmq.PushConsumer
+	mu     sync.Mutex
+	closed bool
+}
+
+func NewCacheDelConsumer(nameSrv, group string) (*CacheDelConsumer, error) {
+	c, err := rocketmq.NewPushConsumer(
+		consumer.WithNameServer([]string{nameSrv}),
+		consumer.WithGroupName(group),
+		consumer.WithConsumerModel(consumer.Clustering),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("create cache-del consumer: %w", err)
+	}
+	return &CacheDelConsumer{c: c}, nil
+}
+
+func (s *CacheDelConsumer) Start(_ context.Context, handler func(ctx context.Context, msg []byte) error) error {
+	if err := s.c.Subscribe(TopicCacheDel, consumer.MessageSelector{}, func(ctx context.Context, msgs ...*primitive.MessageExt) (consumer.ConsumeResult, error) {
+		for _, m := range msgs {
+			if err := handler(ctx, m.Body); err != nil {
+				return consumer.ConsumeRetryLater, nil
+			}
+		}
+		return consumer.ConsumeSuccess, nil
+	}); err != nil {
+		return err
+	}
+	return startWithRetry(TopicCacheDel, func() error { return s.c.Start() })
+}
+
+func (s *CacheDelConsumer) Shutdown() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return nil
+	}
+	s.closed = true
+	return s.c.Shutdown()
 }
 
 // EncodeOrder 订单消息体 JSON 序列化。

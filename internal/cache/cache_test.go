@@ -2,9 +2,14 @@ package cache
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"inskill/internal/mq"
 
 	"github.com/alicebob/miniredis/v2"
 )
@@ -131,5 +136,70 @@ func TestLogicalExpireRebuildLocked(t *testing.T) {
 	}
 	if calls.Load() != 0 {
 		t.Errorf("loader calls = %d, want 0 (lock held)", calls.Load())
+	}
+}
+
+// recordingPublisher 记录发往各 topic 的消息，供补偿链路测试。
+type recordingPublisher struct {
+	mu    sync.Mutex
+	delMsgs []cacheDelMessage
+}
+
+func (r *recordingPublisher) Publish(_ context.Context, topic string, body []byte) error {
+	if topic != mq.TopicCacheDel {
+		return nil
+	}
+	var msg cacheDelMessage
+	if err := json.Unmarshal(body, &msg); err != nil {
+		return err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.delMsgs = append(r.delMsgs, msg)
+	return nil
+}
+
+func (r *recordingPublisher) Shutdown() error { return nil }
+
+func TestDelAndCompensateNoMessageWhenDelSucceeds(t *testing.T) {
+	c, _ := newTestCache(t)
+	pub := &recordingPublisher{}
+	if err := c.Set(context.Background(), "k", "v", time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	DelAndCompensate(context.Background(), c, pub, "k")
+	if len(pub.delMsgs) != 0 {
+		t.Errorf("del messages = %d, want 0 (del succeeded)", len(pub.delMsgs))
+	}
+}
+
+// failingClient 模拟删除失败（如 Redis 连接异常）。
+type failingClient struct{ Client }
+
+func (failingClient) Del(context.Context, ...string) error { return errors.New("redis down") }
+
+func TestDelAndCompensateSendsMessageOnDelFailure(t *testing.T) {
+	c, _ := newTestCache(t)
+	pub := &recordingPublisher{}
+	DelAndCompensate(context.Background(), failingClient{c}, pub, "cache:shop:1")
+	pub.mu.Lock()
+	defer pub.mu.Unlock()
+	if len(pub.delMsgs) != 1 || pub.delMsgs[0].Key != "cache:shop:1" {
+		t.Fatalf("del messages = %+v, want [cache:shop:1]", pub.delMsgs)
+	}
+}
+
+func TestHandleCacheDelMessageDeletesKey(t *testing.T) {
+	c, _ := newTestCache(t)
+	if err := c.Set(context.Background(), "k", "v", time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	handle := HandleCacheDelMessage(c)
+	body, _ := json.Marshal(cacheDelMessage{Key: "k"})
+	if err := handle(context.Background(), body); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Get(context.Background(), "k"); !errors.Is(err, ErrNil) {
+		t.Errorf("key still present after compensate del: %v", err)
 	}
 }

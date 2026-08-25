@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"inskill/internal/lock"
+	"inskill/internal/mq"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -147,4 +148,40 @@ func QueryWithLogicalExpire[T any](c Client, l lock.Lock, ctx context.Context, k
 		}()
 	}
 	return &v, nil
+}
+
+// cacheDelMessage 缓存删除补偿消息体（Topic cache-del），消费端按 key 重删。
+type cacheDelMessage struct {
+	Key string `json:"key"`
+}
+
+// DelAndCompensate 删除缓存 key；删除失败时把 key 发到 TopicCacheDel 异步重删。
+// 删除本身幂等，重复消费无害；补偿仍失败由消费重试承担，最终还有 TTL 兜底。
+// 调用方不需要处理删除失败，与更新数据库后删缓存的「最终一致性」语义对齐。
+func DelAndCompensate(ctx context.Context, c Client, pub mq.Publisher, key string) {
+	if err := c.Del(ctx, key); err == nil {
+		return
+	} else {
+		slog.Warn("cache del failed, scheduling compensation", "key", key, "err", err)
+	}
+	body, err := json.Marshal(cacheDelMessage{Key: key})
+	if err != nil {
+		slog.Warn("marshal cache-del message failed", "key", key, "err", err)
+		return
+	}
+	if err := pub.Publish(ctx, mq.TopicCacheDel, body); err != nil {
+		slog.Warn("cache-del compensation publish failed", "key", key, "err", err)
+	}
+}
+
+// HandleCacheDelMessage 返回 cache-del 消息处理函数：重删缓存 key。
+// 删除失败返回 error 触发 RocketMQ 消费重试。
+func HandleCacheDelMessage(c Client) func(ctx context.Context, body []byte) error {
+	return func(ctx context.Context, body []byte) error {
+		var msg cacheDelMessage
+		if err := json.Unmarshal(body, &msg); err != nil {
+			return err
+		}
+		return c.Del(ctx, msg.Key)
+	}
 }

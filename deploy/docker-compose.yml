@@ -41,6 +41,7 @@ services:
       sh -c "sleep 15 &&
       sh mqadmin updateTopic -n rocketmq-namesrv:9876 -c DefaultCluster -t seckill-order &&
       sh mqadmin updateTopic -n rocketmq-namesrv:9876 -c DefaultCluster -t stock-refund &&
+      sh mqadmin updateTopic -n rocketmq-namesrv:9876 -c DefaultCluster -t cache-del &&
       echo topics created"
     restart: "no"
 

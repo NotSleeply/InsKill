@@ -51,20 +51,20 @@ func main() {
 		logger.Error("init cache failed", "err", err)
 		os.Exit(1)
 	}
-	shopSvc := service.NewShopService(repository.NewShopRepo(db), cacheClient, lock.NewRedisLock(rdb), rdb)
-	if err := shopSvc.PreloadGeo(context.Background()); err != nil {
-		logger.Error("preload geo failed", "err", err)
-	}
-	handler.NewShopHandler(shopSvc).Register(srv.Engine().Group("/shop"))
-	handler.NewShopTypeHandler(service.NewShopTypeService(repository.NewShopTypeRepo(db), rdb)).
-		Register(srv.Engine().Group("/shop-type"))
-
 	orderPub, err := mq.NewRocketMQPublisher(cfg.RocketMQNameSrv, "inskill-producer")
 	if err != nil {
 		logger.Error("init rocketmq producer failed", "err", err)
 		os.Exit(1)
 	}
 	defer orderPub.Shutdown()
+
+	shopSvc := service.NewShopService(repository.NewShopRepo(db), cacheClient, lock.NewRedisLock(rdb), rdb, orderPub)
+	if err := shopSvc.PreloadGeo(context.Background()); err != nil {
+		logger.Error("preload geo failed", "err", err)
+	}
+	handler.NewShopHandler(shopSvc).Register(srv.Engine().Group("/shop"))
+	handler.NewShopTypeHandler(service.NewShopTypeService(repository.NewShopTypeRepo(db), rdb)).
+		Register(srv.Engine().Group("/shop-type"))
 
 	voucherOrderSvc := service.NewVoucherOrderService(
 		repository.NewVoucherOrderRepo(db), repository.NewSeckillVoucherRepo(db), orderPub, rdb)
@@ -118,6 +118,18 @@ func main() {
 		os.Exit(1)
 	}
 	defer refundConsumer.Shutdown()
+
+	// 缓存删除补偿消费者：重删删除失败的缓存 key（Del 幂等，重复消费无害）。
+	cacheDelConsumer, err := mq.NewCacheDelConsumer(cfg.RocketMQNameSrv, "inskill-cache-del-consumer")
+	if err != nil {
+		logger.Error("init cache-del consumer failed", "err", err)
+		os.Exit(1)
+	}
+	if err := cacheDelConsumer.Start(context.Background(), cache.HandleCacheDelMessage(cacheClient)); err != nil {
+		logger.Error("start cache-del consumer failed", "err", err)
+		os.Exit(1)
+	}
+	defer cacheDelConsumer.Shutdown()
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()

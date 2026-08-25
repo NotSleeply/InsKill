@@ -47,7 +47,7 @@ func TestShopGetByIDRebuildsStaleCache(t *testing.T) {
 		t.Fatal(err)
 	}
 	repo := &fakeShopRepo{shops: map[int64]*model.Shop{1: {ID: 1, Name: "海底捞"}}}
-	svc := NewShopService(repo, c, lock.NewRedisLock(rdb), rdb)
+	svc := NewShopService(repo, c, lock.NewRedisLock(rdb), rdb, &fakePublisher{})
 	// 预置过期缓存
 	_ = c.Set(context.Background(), "cache:shop:1",
 		`{"data":{"id":1,"name":"旧店名","typeId":0,"images":"","area":"","address":"","x":0,"y":0,"avgPrice":0,"sold":0,"comments":0,"score":0,"openHours":""},"expireTime":"2000-01-01T00:00:00Z"}`, 0)

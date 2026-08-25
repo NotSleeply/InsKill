@@ -11,6 +11,7 @@ import (
 	"inskill/internal/cache"
 	"inskill/internal/lock"
 	"inskill/internal/model"
+	"inskill/internal/mq"
 	"inskill/internal/pkg/errs"
 
 	"github.com/redis/go-redis/v9"
@@ -51,10 +52,11 @@ type shopService struct {
 	c    cache.Client
 	lock lock.Lock
 	rdb  *redis.Client
+	pub  mq.Publisher
 }
 
-func NewShopService(repo ShopRepository, c cache.Client, l lock.Lock, rdb *redis.Client) ShopService {
-	return &shopService{repo: repo, c: c, lock: l, rdb: rdb}
+func NewShopService(repo ShopRepository, c cache.Client, l lock.Lock, rdb *redis.Client, pub mq.Publisher) ShopService {
+	return &shopService{repo: repo, c: c, lock: l, rdb: rdb, pub: pub}
 }
 
 // GetByID 逻辑过期策略（Java 版 queryById 当前实现）。
@@ -74,7 +76,7 @@ func (s *shopService) Create(ctx context.Context, shop *model.Shop) error {
 	return s.repo.Create(ctx, shop)
 }
 
-// Update 先更新数据库，再删缓存（对齐 Java 版 update 逻辑）。
+// Update 先更新数据库，再删缓存；删除失败由 MQ 补偿异步重删，TTL 兜底最终一致性。
 func (s *shopService) Update(ctx context.Context, shop *model.Shop) error {
 	if shop.ID == 0 {
 		return fmt.Errorf("%w: shop id required", errs.ErrNotFound)
@@ -82,7 +84,7 @@ func (s *shopService) Update(ctx context.Context, shop *model.Shop) error {
 	if err := s.repo.Update(ctx, shop); err != nil {
 		return err
 	}
-	_ = s.c.Del(ctx, shopCacheKey+strconv.FormatInt(shop.ID, 10))
+	cache.DelAndCompensate(ctx, s.c, s.pub, shopCacheKey+strconv.FormatInt(shop.ID, 10))
 	return nil
 }
 
